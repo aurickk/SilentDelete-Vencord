@@ -33,7 +33,7 @@ const settings = definePluginSettings({
     },
     accentColor: {
         type: OptionType.STRING,
-        description: "Hex color code for the Silent Delete icon and menu text (e.g. #ed4245)",
+        description: "Accent color for the Silent Edit icon (hex code)",
         default: "#ed4245"
     }
 });
