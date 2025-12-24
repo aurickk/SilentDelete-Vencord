@@ -8,17 +8,17 @@ import { ChannelStore, Constants, Menu, RestAPI, UserStore } from "@webpack/comm
 const settings = definePluginSettings({
     replacementText: {
         type: OptionType.STRING,
-        description: "Text to replace the message with before deletion",
+        description: "Text to replace the message with before deletion.",
         default: "** **"
     },
     deleteDelay: {
         type: OptionType.NUMBER,
-        description: "Delay in milliseconds before deleting the replacement message (recommended: 100-500)",
+        description: "Delay in milliseconds before deleting the replacement message (recommended: 100-500).",
         default: 200
     },
     suppressNotifications: {
         type: OptionType.BOOLEAN,
-        description: "Suppress notifications when replacing the message (prevents pinging mentioned users)",
+        description: "Suppress notifications when replacing the message (prevents pinging mentioned users).",
         default: true
     },
     deleteOriginal: {
@@ -28,12 +28,12 @@ const settings = definePluginSettings({
     },
     purgeInterval: {
         type: OptionType.NUMBER,
-        description: "Delay in milliseconds between each message deletion during /silentpurge (recommended: 500-1000 to avoid rate limits)",
+        description: "Delay in milliseconds between each message deletion during /silentpurge (recommended: 500-1000 to avoid rate limits).",
         default: 500
     },
     accentColor: {
         type: OptionType.STRING,
-        description: "Accent color for the Silent Edit icon (hex code)",
+        description: "Accent color for the Silent Edit icon (hex code).",
         default: "#ed4245"
     }
 });
