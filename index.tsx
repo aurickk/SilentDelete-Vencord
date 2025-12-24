@@ -38,107 +38,59 @@ const settings = definePluginSettings({
     }
 });
 
-const SilentDeleteIcon = () => {
-    const color = settings.store.accentColor || "#ed4245";
-    return <svg width="18" height="18" viewBox="0 0 24 24" fill={color}>
+const getAccentColor = () => settings.store.accentColor || "#ed4245";
+
+const SilentDeleteIcon = () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill={getAccentColor()}>
         <path d="M15 3.999V2H9V3.999H3V5.999H21V3.999H15Z" />
         <path d="M5 6.99902V18.999C5 20.101 5.897 20.999 7 20.999H17C18.103 20.999 19 20.101 19 18.999V6.99902H5ZM11 17H9V11H11V17ZM15 17H13V11H15V17Z" />
-    </svg>;
-};
+    </svg>
+);
 
-function messageSendWrapper(content: string, nonce: string, channelId: string, suppressNotifications = false) {
-    return RestAPI.post({
-        url: Constants.Endpoints.MESSAGES(channelId),
-        body: {
-            content: content,
-            flags: suppressNotifications ? 4096 : 0,
-            mobile_network_type: "unknown",
-            nonce: nonce,
-            tts: false,
-        }
-    });
-}
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
-function messageDeleteWrapper(channelId: string, messageId: string) {
-    return RestAPI.del({
-        url: Constants.Endpoints.MESSAGE(channelId, messageId)
-    });
-}
-
-async function sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function silentDeleteMessage(channelId: string, messageId: string): Promise<boolean> {
+async function silentDeleteMessage(channelId: string, messageId: string, deleteOriginal = true): Promise<boolean> {
     try {
-        const replacementText = settings.store.replacementText || "** **";
-        const deleteDelay = settings.store.deleteDelay || 200;
-        const suppressNotifications = settings.store.suppressNotifications ?? true;
-        const deleteOriginal = settings.store.deleteOriginal ?? true;
+        const { replacementText = "** **", deleteDelay = 200, suppressNotifications = true, deleteOriginal: shouldDelete = true } = settings.store;
 
-        const response = await messageSendWrapper(replacementText, messageId, channelId, suppressNotifications);
-        const newMessageId = response.body.id;
-        
+        const response = await RestAPI.post({
+            url: Constants.Endpoints.MESSAGES(channelId),
+            body: {
+                content: replacementText,
+                flags: suppressNotifications ? 4096 : 0,
+                mobile_network_type: "unknown",
+                nonce: messageId,
+                tts: false
+            }
+        });
+
         await sleep(deleteDelay);
+        await RestAPI.del({ url: Constants.Endpoints.MESSAGE(channelId, response.body.id) });
         
-        await messageDeleteWrapper(channelId, newMessageId);
-        
-        if (deleteOriginal) {
+        if (deleteOriginal && shouldDelete) {
             await sleep(100);
-            await messageDeleteWrapper(channelId, messageId);
+            await RestAPI.del({ url: Constants.Endpoints.MESSAGE(channelId, messageId) });
         }
         
         return true;
     } catch (error) {
-        console.error("[SilentDelete] Error during silent delete:", error);
+        console.error("[SilentDelete] Error:", error);
         return false;
     }
 }
 
 const messageContextMenuPatch: NavContextMenuPatchCallback = (children, { message }) => {
-    if (!message) return;
+    if (!message || message.author.id !== UserStore.getCurrentUser().id || !message.deleted) return;
     
-    const isMessageOwner = message.author.id === UserStore.getCurrentUser().id;
-    if (!isMessageOwner) return;
-    
-    const isDeleted = message.deleted === true;
-    
-    // Add SilentDelete History option for deleted messages
-    if (isDeleted) {
-        const handleSilentDeleteHistory = async () => {
-            try {
-                const channelId = message.channel_id;
-                const deletedMessageId = message.id;
-                const replacementText = settings.store.replacementText || "** **";
-                const deleteDelay = settings.store.deleteDelay || 200;
-                const suppressNotifications = settings.store.suppressNotifications ?? true;
-
-                const response = await messageSendWrapper(replacementText, deletedMessageId, channelId, suppressNotifications);
-                const newMessageId = response.body.id;
-                
-                await sleep(deleteDelay);
-                
-                await messageDeleteWrapper(channelId, newMessageId);
-                
-                console.log("[SilentDelete] Successfully cleared message from logger history");
-            } catch (error) {
-                console.error("[SilentDelete] Error during silent delete history:", error);
-            }
-        };
-
-        // Find the group where delete-related items are and add our option
-        const group = findGroupChildrenByChildId("remove-message-history", children) ?? children;
-        
-        const accentColor = settings.store.accentColor || "#ed4245";
-        group.push(
-            <Menu.MenuItem
-                id="silent-delete-history"
-                label={<span style={{ color: accentColor }}>Silent Delete History</span>}
-                action={handleSilentDeleteHistory}
-                icon={SilentDeleteIcon}
-            />
-        );
-    }
+    const group = findGroupChildrenByChildId("remove-message-history", children) ?? children;
+    group.push(
+        <Menu.MenuItem
+            id="silent-delete-history"
+            label={<span style={{ color: getAccentColor() }}>Silent Delete History</span>}
+            action={() => silentDeleteMessage(message.channel_id, message.id, false)}
+            icon={SilentDeleteIcon}
+        />
+    );
 };
 
 export default definePlugin({
@@ -149,6 +101,7 @@ export default definePlugin({
         { name: "appleflyer", id: 1209096766075703368n }
     ],
     dependencies: ["MessagePopoverAPI", "CommandsAPI"],
+    settings,
     
     contextMenus: {
         "message": messageContextMenuPatch
@@ -159,136 +112,76 @@ export default definePlugin({
             name: "silentpurge",
             description: "Silently delete your recent messages in this channel",
             inputType: ApplicationCommandInputType.BUILT_IN,
-            options: [
-                {
-                    name: "count",
-                    description: "Number of your messages to silently delete (1-100)",
-                    type: ApplicationCommandOptionType.INTEGER,
-                    required: true,
-                    minValue: 1,
-                    maxValue: 100
-                }
-            ],
-            execute: async (opts, ctx) => {
+            options: [{
+                name: "count",
+                description: "Number of your messages to silently delete (1-100)",
+                type: ApplicationCommandOptionType.INTEGER,
+                required: true,
+                minValue: 1,
+                maxValue: 100
+            }],
+            execute: (opts, ctx) => {
                 const count = opts.find(o => o.name === "count")?.value as number;
+                if (!count || count < 1) return;
+
                 const channelId = ctx.channel.id;
                 const currentUserId = UserStore.getCurrentUser().id;
-                
-                if (!count || count < 1) {
-                    return;
-                }
 
-                try {
-                    // Fetch messages directly from Discord API
-                    const userMessages: any[] = [];
-                    let lastMessageId: string | undefined;
-                    
-                    // Keep fetching until we have enough of our own messages
-                    while (userMessages.length < count) {
-                        const response = await RestAPI.get({
-                            url: Constants.Endpoints.MESSAGES(channelId),
-                            query: {
-                                limit: 100,
-                                ...(lastMessageId && { before: lastMessageId })
-                            }
-                        });
+                (async () => {
+                    try {
+                        const userMessages: any[] = [];
+                        let lastMessageId: string | undefined;
                         
-                        const messages = response.body;
-                        
-                        if (!messages || messages.length === 0) {
-                            break; // No more messages to fetch
-                        }
-                        
-                        // Filter to only our own messages
-                        for (const msg of messages) {
-                            if (msg.author?.id === currentUserId) {
-                                userMessages.push(msg);
-                                if (userMessages.length >= count) {
-                                    break;
+                        while (userMessages.length < count) {
+                            const response = await RestAPI.get({
+                                url: Constants.Endpoints.MESSAGES(channelId),
+                                query: { limit: 100, ...(lastMessageId && { before: lastMessageId }) }
+                            });
+                            
+                            const messages = response.body;
+                            if (!messages?.length) break;
+                            
+                            for (const msg of messages) {
+                                if (msg.author?.id === currentUserId) {
+                                    userMessages.push(msg);
+                                    if (userMessages.length >= count) break;
                                 }
                             }
+                            
+                            lastMessageId = messages[messages.length - 1].id;
+                            if (messages.length < 100) break;
+                            await sleep(100);
                         }
-                        
-                        // Set the last message ID for pagination
-                        lastMessageId = messages[messages.length - 1].id;
-                        
-                        // If we got less than 100 messages, we've reached the end
-                        if (messages.length < 100) {
-                            break;
+
+                        if (!userMessages.length) return;
+
+                        const purgeInterval = settings.store.purgeInterval || 500;
+                        let successCount = 0;
+
+                        for (let i = 0; i < userMessages.length; i++) {
+                            if (await silentDeleteMessage(channelId, userMessages[i].id)) successCount++;
+                            if (i < userMessages.length - 1) await sleep(purgeInterval);
                         }
-                        
-                        // Small delay to avoid rate limiting during fetch
-                        await sleep(100);
+
+                        sendBotMessage(channelId, { content: `Successfully silently deleted ${successCount} message(s).` });
+                    } catch (error) {
+                        console.error("[SilentDelete] Error during silent purge:", error);
                     }
-
-                    if (userMessages.length === 0) {
-                        return;
-                    }
-
-                    let successCount = 0;
-                    const purgeInterval = settings.store.purgeInterval || 500;
-
-                    for (let i = 0; i < userMessages.length; i++) {
-                        const msg = userMessages[i];
-                        const success = await silentDeleteMessage(channelId, msg.id);
-                        if (success) {
-                            successCount++;
-                        }
-                        // Add delay between deletions to avoid rate limiting (skip delay after last message)
-                        if (i < userMessages.length - 1) {
-                            await sleep(purgeInterval);
-                        }
-                    }
-
-                    sendBotMessage(channelId, { content: `Successfully silently deleted ${successCount} message(s).` });
-                } catch (error) {
-                    console.error("[SilentDelete] Error during silent purge:", error);
-                }
+                })();
             }
         }
     ],
     
-    settings,
-    
     start() {
-        // Original Silent Delete popover button (for non-deleted messages)
         addButton("SilentDelete", msg => {
-            const isMessageOwner = msg.author.id === UserStore.getCurrentUser().id;
-            const isDeleted = msg.deleted === true;
-            
-            if (!isMessageOwner || isDeleted) return null;
+            if (msg.author.id !== UserStore.getCurrentUser().id || msg.deleted) return null;
 
-            const handleClick = async () => {
-                try {
-                    const channelId = msg.channel_id;
-                    const originalMessageId = msg.id;
-                    const replacementText = settings.store.replacementText || "** **";
-                    const deleteDelay = settings.store.deleteDelay || 200;
-                    const suppressNotifications = settings.store.suppressNotifications ?? true;
-                    const deleteOriginal = settings.store.deleteOriginal ?? true;
-
-                    const response = await messageSendWrapper(replacementText, originalMessageId, channelId, suppressNotifications);
-                    const newMessageId = response.body.id;
-                    
-                    await sleep(deleteDelay);
-                    
-                    await messageDeleteWrapper(channelId, newMessageId);
-                    
-                    if (deleteOriginal) {
-                        await sleep(100);
-                        await messageDeleteWrapper(channelId, originalMessageId);
-                    }
-                } catch (error) {
-                    console.error("[SilentDelete] Error during silent delete:", error);
-                }
-            };
-            
             return {
                 label: "Silent Delete",
                 icon: SilentDeleteIcon,
                 message: msg,
                 channel: ChannelStore.getChannel(msg.channel_id),
-                onClick: handleClick,
+                onClick: () => silentDeleteMessage(msg.channel_id, msg.id),
                 dangerous: true
             };
         });
