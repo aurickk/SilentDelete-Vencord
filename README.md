@@ -32,7 +32,7 @@ pnpm install --frozen-lockfile
 ```
 3. Navigate to the `src` folder in the cloned Vencord repository, create a new folder called `userplugins` if it dosen't already exist.
 
-3. Inside `userplugins`, create a folder called `SilentDelete`, then download `index.tsx` from this repository and move it into that folder (so the path is `src/userplugins/SilentDelete/index.tsx`).
+3. Inside `userplugins`, create a folder called `silentDelete`, then download `index.tsx` from this repository and move it into that folder (so the path is `src/userplugins/silentDelete/index.tsx`).
 
 4. Build Vencord and inject Discord:
 
